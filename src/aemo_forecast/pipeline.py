@@ -18,8 +18,17 @@ REGIONS = ("NSW1", "QLD1", "SA1", "TAS1", "VIC1")
 SOURCE_PRIORITY = {"PDPASA": 0, "STPASA": 1}
 PRICE_KEY = ("PD7DAY", "PRICESOLUTION")
 GAS_KEY = ("PD7DAY", "MARKET_SUMMARY")
+INTERCONNECTOR_KEY = ("PD7DAY", "INTERCONNECTORSOLUTION")
 PDPASA_KEY = ("PDPASA", "REGIONSOLUTION")
 STPASA_KEY = ("STPASA", "REGIONSOLUTION")
+INTERCONNECTOR_REGIONS = {
+    "N-Q-MNSP1": ("NSW1", "QLD1"),
+    "NSW1-QLD1": ("NSW1", "QLD1"),
+    "T-V-MNSP1": ("TAS1", "VIC1"),
+    "V-S-MNSP1": ("VIC1", "SA1"),
+    "V-SA": ("VIC1", "SA1"),
+    "VIC1-NSW1": ("VIC1", "NSW1"),
+}
 
 
 def parse_datetime(value: str) -> datetime:
@@ -86,6 +95,36 @@ def normalize_gas(rows: list[dict[str, str]], source_url: str) -> list[dict[str,
             }
         )
     return normalized
+
+
+def normalize_interconnector_imports(rows: list[dict[str, str]], source_url: str) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        regions = INTERCONNECTOR_REGIONS.get(row.get("INTERCONNECTORID", ""))
+        flow = parse_optional_float(row.get("MWFLOW"))
+        if regions is None or flow is None:
+            continue
+
+        run_datetime = isoformat(row["RUN_DATETIME"])
+        interval_datetime = isoformat(row["INTERVAL_DATETIME"])
+        horizon = horizon_for_interval(row["RUN_DATETIME"], row["INTERVAL_DATETIME"])
+        from_region, to_region = regions
+
+        for region_id, delta in ((from_region, -flow), (to_region, flow)):
+            key = (region_id, interval_datetime)
+            if key not in grouped:
+                grouped[key] = {
+                    "dataset": "PD7DAY",
+                    "source_url": source_url,
+                    "run_datetime": run_datetime,
+                    "interval_datetime": interval_datetime,
+                    "region_id": region_id,
+                    "horizon": horizon,
+                    "net_import_mw": 0.0,
+                }
+            grouped[key]["net_import_mw"] += delta
+
+    return [grouped[key] for key in sorted(grouped)]
 
 
 def normalize_pasa(rows: list[dict[str, str]], dataset: str, source_url: str) -> list[dict[str, Any]]:
@@ -167,9 +206,21 @@ def _chart_datetimes(rows: list[dict[str, Any]]) -> list[datetime]:
     return values
 
 
-def build_region_charts(price_rows: list[dict[str, Any]], adequacy_rows: list[dict[str, Any]]) -> dict[str, str]:
+def build_region_charts(
+    price_rows: list[dict[str, Any]],
+    adequacy_rows: list[dict[str, Any]],
+    import_rows: list[dict[str, Any]],
+) -> dict[str, str]:
     charts: dict[str, str] = {}
     merged_rows = merge_for_charting(adequacy_rows)
+    imports_by_region = {
+        region: {
+            row["interval_datetime"]: row["net_import_mw"]
+            for row in import_rows
+            if row["region_id"] == region
+        }
+        for region in REGIONS
+    }
 
     for region in REGIONS:
         region_prices = sorted(
@@ -180,6 +231,7 @@ def build_region_charts(price_rows: list[dict[str, Any]], adequacy_rows: list[di
             [row for row in merged_rows if row["region_id"] == region],
             key=lambda row: row["interval_datetime"],
         )
+        region_imports = imports_by_region[region]
 
         charts[f"{region.lower()}_price.svg"] = line_chart(
             title=f"{region} forecast price",
@@ -195,6 +247,11 @@ def build_region_charts(price_rows: list[dict[str, Any]], adequacy_rows: list[di
                     "Available capacity",
                     "#059669",
                     [row["aggregate_capacity_available_mw"] for row in region_adequacy],
+                ),
+                Series(
+                    "Net imports",
+                    "#0f766e",
+                    [region_imports.get(row["interval_datetime"]) for row in region_adequacy],
                 ),
                 Series("LOR1 level", "#d97706", [row["calculated_lor1_level_mw"] for row in region_adequacy]),
                 Series("LOR2 level", "#7c3aed", [row["calculated_lor2_level_mw"] for row in region_adequacy]),
@@ -222,6 +279,7 @@ class BuildResult:
     summary: dict[str, Any]
     price_rows: list[dict[str, Any]]
     gas_rows: list[dict[str, Any]]
+    interconnector_rows: list[dict[str, Any]]
     adequacy_rows: list[dict[str, Any]]
     notices: list[dict[str, Any]]
     charts: dict[str, str]
@@ -232,12 +290,13 @@ def build_dataset_bundle() -> BuildResult:
     pdpasa_url = latest_matching_file("PDPASA", "PUBLIC_PDPASA_")
     stpasa_url = latest_matching_file("Short_Term_PASA_Reports", "PUBLIC_STPASA_")
 
-    pd7day_records = read_aemo_records(fetch_bytes(pd7day_url), [PRICE_KEY, GAS_KEY])
+    pd7day_records = read_aemo_records(fetch_bytes(pd7day_url), [PRICE_KEY, GAS_KEY, INTERCONNECTOR_KEY])
     pdpasa_records = read_aemo_records(fetch_bytes(pdpasa_url), [PDPASA_KEY])
     stpasa_records = read_aemo_records(fetch_bytes(stpasa_url), [STPASA_KEY])
 
     price_rows = normalize_prices(pd7day_records.get(PRICE_KEY, []), pd7day_url)
     gas_rows = normalize_gas(pd7day_records.get(GAS_KEY, []), pd7day_url)
+    interconnector_rows = normalize_interconnector_imports(pd7day_records.get(INTERCONNECTOR_KEY, []), pd7day_url)
     adequacy_rows = normalize_pasa(pdpasa_records.get(PDPASA_KEY, []), "PDPASA", pdpasa_url)
     adequacy_rows.extend(normalize_pasa(stpasa_records.get(STPASA_KEY, []), "STPASA", stpasa_url))
 
@@ -250,7 +309,7 @@ def build_dataset_bundle() -> BuildResult:
             notice_errors.append({"source_url": url, "error": f"HTTP {exc.code}"})
     notices = sorted(notices, key=lambda row: row.get("creation_datetime", ""), reverse=True)
 
-    charts = build_region_charts(price_rows, adequacy_rows)
+    charts = build_region_charts(price_rows, adequacy_rows, interconnector_rows)
 
     summary = {
         "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
@@ -263,6 +322,7 @@ def build_dataset_bundle() -> BuildResult:
         "counts": {
             "price_rows": len(price_rows),
             "gas_rows": len(gas_rows),
+            "interconnector_rows": len(interconnector_rows),
             "adequacy_rows": len(adequacy_rows),
             "market_notices": len(notices),
         },
@@ -275,6 +335,7 @@ def build_dataset_bundle() -> BuildResult:
         summary=summary,
         price_rows=price_rows,
         gas_rows=gas_rows,
+        interconnector_rows=interconnector_rows,
         adequacy_rows=adequacy_rows,
         notices=notices,
         charts=charts,

@@ -35,7 +35,7 @@ def _region_section(region: str) -> str:
         </figure>
         <figure>
           <img src="charts/{slug}_adequacy.svg" alt="{region} demand and capacity chart" />
-          <figcaption>Demand, available capacity, LOR1, and LOR2</figcaption>
+          <figcaption>Demand, available capacity, net imports, LOR1, and LOR2</figcaption>
         </figure>
         <figure>
           <img src="charts/{slug}_renewables.svg" alt="{region} solar and wind chart" />
@@ -73,10 +73,12 @@ def render_index(build: BuildResult) -> str:
     <section class="summary">
       <p>Latest generated site built from public AEMO NEMWeb forecast datasets.</p>
       <p><strong>Generated:</strong> {escape(build.summary["generated_at"])}</p>
-      <p><strong>Sources:</strong> PD7DAY, PDPASA, STPASA, and the latest day of market notices.</p>
+      <p><strong>Sources:</strong> PD7DAY prices, gas, and interconnector flows; PDPASA; STPASA; and the latest day of market notices.</p>
       <p class="links">
         <a href="data/prices.csv">prices.csv</a>
         <a href="data/prices.json">prices.json</a>
+        <a href="data/interconnector_imports.csv">interconnector_imports.csv</a>
+        <a href="data/interconnector_imports.json">interconnector_imports.json</a>
         <a href="data/adequacy.csv">adequacy.csv</a>
         <a href="data/adequacy.json">adequacy.json</a>
         <a href="data/gas_fuel_forecast.csv">gas_fuel_forecast.csv</a>
@@ -105,6 +107,8 @@ def write_site(output_dir: Path, build: BuildResult) -> None:
 
     write_csv(data_dir / "prices.csv", build.price_rows)
     write_json(data_dir / "prices.json", build.price_rows)
+    write_csv(data_dir / "interconnector_imports.csv", build.interconnector_rows)
+    write_json(data_dir / "interconnector_imports.json", build.interconnector_rows)
     write_csv(data_dir / "adequacy.csv", build.adequacy_rows)
     write_json(data_dir / "adequacy.json", build.adequacy_rows)
     write_csv(data_dir / "gas_fuel_forecast.csv", build.gas_rows)

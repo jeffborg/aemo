@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from aemo_forecast.pipeline import REGIONS, build_region_charts, horizon_for_interval, merge_for_charting
+from aemo_forecast.pipeline import (
+    REGIONS,
+    build_region_charts,
+    horizon_for_interval,
+    merge_for_charting,
+    normalize_interconnector_imports,
+)
 
 
 class PipelineTests(unittest.TestCase):
@@ -29,6 +35,7 @@ class PipelineTests(unittest.TestCase):
     def test_adequacy_chart_uses_available_capacity(self) -> None:
         price_rows = []
         adequacy_rows = []
+        import_rows = []
         for region in REGIONS:
             for hour, rrp, demand, available in (
                 ("2026-05-16T00:00:00", 100.0, 9000.0, 11000.0),
@@ -56,10 +63,50 @@ class PipelineTests(unittest.TestCase):
                         "total_intermittent_generation_mw": 2200.0,
                     }
                 )
+        import_rows.extend(
+            [
+                {
+                    "region_id": "NSW1",
+                    "interval_datetime": "2026-05-16T00:00:00",
+                    "net_import_mw": 150.0,
+                },
+                {
+                    "region_id": "NSW1",
+                    "interval_datetime": "2026-05-16T06:00:00",
+                    "net_import_mw": -50.0,
+                },
+            ]
+        )
 
-        charts = build_region_charts(price_rows, adequacy_rows)
+        charts = build_region_charts(price_rows, adequacy_rows, import_rows)
 
         self.assertIn("Available capacity", charts["nsw1_adequacy.svg"])
+        self.assertIn("Net imports", charts["nsw1_adequacy.svg"])
+
+    def test_normalize_interconnector_imports_rolls_up_to_regions(self) -> None:
+        normalized = normalize_interconnector_imports(
+            [
+                {
+                    "RUN_DATETIME": "2026/05/15 07:30:00",
+                    "INTERVAL_DATETIME": "2026/05/15 07:30:00",
+                    "INTERCONNECTORID": "NSW1-QLD1",
+                    "MWFLOW": "100",
+                },
+                {
+                    "RUN_DATETIME": "2026/05/15 07:30:00",
+                    "INTERVAL_DATETIME": "2026/05/15 07:30:00",
+                    "INTERCONNECTORID": "V-SA",
+                    "MWFLOW": "-50",
+                },
+            ],
+            "https://example.com/pd7day.zip",
+        )
+
+        by_region = {row["region_id"]: row["net_import_mw"] for row in normalized}
+        self.assertEqual(-100.0, by_region["NSW1"])
+        self.assertEqual(100.0, by_region["QLD1"])
+        self.assertEqual(50.0, by_region["VIC1"])
+        self.assertEqual(-50.0, by_region["SA1"])
 
 
 if __name__ == "__main__":
