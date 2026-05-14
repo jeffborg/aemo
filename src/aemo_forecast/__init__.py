@@ -1,0 +1,2 @@
+"""AEMO forecast publisher."""
+

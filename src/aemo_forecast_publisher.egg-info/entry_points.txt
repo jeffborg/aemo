@@ -1,0 +1,2 @@
+[console_scripts]
+aemo-publish = aemo_forecast.cli:main
