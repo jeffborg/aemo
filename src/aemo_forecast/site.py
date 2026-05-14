@@ -35,7 +35,7 @@ def _region_section(region: str) -> str:
         </figure>
         <figure>
           <img src="charts/{slug}_adequacy.svg" alt="{region} demand and capacity chart" />
-          <figcaption>Demand, capacity, LOR1, and LOR2</figcaption>
+          <figcaption>Demand, available capacity, LOR1, and LOR2</figcaption>
         </figure>
         <figure>
           <img src="charts/{slug}_renewables.svg" alt="{region} solar and wind chart" />
@@ -117,4 +117,3 @@ def write_site(output_dir: Path, build: BuildResult) -> None:
         (charts_dir / filename).write_text(svg, encoding="utf-8")
 
     (output_dir / "index.html").write_text(render_index(build), encoding="utf-8")
-

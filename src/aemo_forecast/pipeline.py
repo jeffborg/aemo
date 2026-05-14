@@ -160,12 +160,11 @@ def merge_for_charting(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return merged
 
 
-def _chart_labels(rows: list[dict[str, Any]]) -> list[str]:
-    labels = []
+def _chart_datetimes(rows: list[dict[str, Any]]) -> list[datetime]:
+    values = []
     for row in rows:
-        timestamp = datetime.fromisoformat(row["interval_datetime"])
-        labels.append(timestamp.strftime("%d %b %H:%M"))
-    return labels
+        values.append(datetime.fromisoformat(row["interval_datetime"]))
+    return values
 
 
 def build_region_charts(price_rows: list[dict[str, Any]], adequacy_rows: list[dict[str, Any]]) -> dict[str, str]:
@@ -184,18 +183,18 @@ def build_region_charts(price_rows: list[dict[str, Any]], adequacy_rows: list[di
 
         charts[f"{region.lower()}_price.svg"] = line_chart(
             title=f"{region} forecast price",
-            x_labels=_chart_labels(region_prices),
+            x_values=_chart_datetimes(region_prices),
             series_list=[Series("RRP", "#2563eb", [row["rrp"] for row in region_prices])],
         )
         charts[f"{region.lower()}_adequacy.svg"] = line_chart(
             title=f"{region} demand and capacity",
-            x_labels=_chart_labels(region_adequacy),
+            x_values=_chart_datetimes(region_adequacy),
             series_list=[
                 Series("Demand P50", "#dc2626", [row["demand50_mw"] for row in region_adequacy]),
                 Series(
-                    "Constrained capacity",
+                    "Available capacity",
                     "#059669",
-                    [row["constrained_capacity_mw"] for row in region_adequacy],
+                    [row["aggregate_capacity_available_mw"] for row in region_adequacy],
                 ),
                 Series("LOR1 level", "#d97706", [row["calculated_lor1_level_mw"] for row in region_adequacy]),
                 Series("LOR2 level", "#7c3aed", [row["calculated_lor2_level_mw"] for row in region_adequacy]),
@@ -203,7 +202,7 @@ def build_region_charts(price_rows: list[dict[str, Any]], adequacy_rows: list[di
         )
         charts[f"{region.lower()}_renewables.svg"] = line_chart(
             title=f"{region} solar and wind forecast",
-            x_labels=_chart_labels(region_adequacy),
+            x_values=_chart_datetimes(region_adequacy),
             series_list=[
                 Series("Solar UIGF", "#f59e0b", [row["ss_solar_uigf_mw"] for row in region_adequacy]),
                 Series("Wind UIGF", "#0ea5e9", [row["ss_wind_uigf_mw"] for row in region_adequacy]),
