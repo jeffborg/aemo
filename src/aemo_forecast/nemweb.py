@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import urllib.parse
 import urllib.request
 from datetime import date, timedelta
 from html.parser import HTMLParser
+from urllib.error import HTTPError
 
 
 BASE_URL = "https://nemweb.com.au/Reports/Current"
@@ -35,8 +37,18 @@ def fetch_text(url: str) -> str:
 
 
 def fetch_bytes(url: str) -> bytes:
-    with urllib.request.urlopen(_request(url)) as response:
-        return response.read()
+    try:
+        with urllib.request.urlopen(_request(url)) as response:
+            return response.read()
+    except HTTPError as exc:
+        if exc.code != 403:
+            raise
+        result = subprocess.run(
+            ["curl", "-A", DEFAULT_HEADERS["User-Agent"], "-L", "--fail", url],
+            check=True,
+            capture_output=True,
+        )
+        return result.stdout
 
 
 def list_links(directory_url: str) -> list[str]:
@@ -45,13 +57,17 @@ def list_links(directory_url: str) -> list[str]:
     return parser.links
 
 
-def latest_matching_file(directory_name: str, prefix: str) -> str:
+def matching_files(directory_name: str, prefix: str) -> list[str]:
     directory_url = f"{BASE_URL}/{directory_name}/"
-    links = [
+    return sorted(
         urllib.parse.urljoin(directory_url, link)
         for link in list_links(directory_url)
         if prefix in link and link.endswith(".zip")
-    ]
+    )
+
+
+def latest_matching_file(directory_name: str, prefix: str) -> str:
+    links = matching_files(directory_name, prefix)
     if not links:
         raise RuntimeError(f"No files found for {directory_name} matching {prefix}")
     return sorted(links)[-1]
@@ -84,4 +100,3 @@ def recent_market_notice_files() -> list[str]:
     earliest_date = latest_date - timedelta(days=1)
     selected = [link for item_date, link in dated_links if item_date >= earliest_date]
     return sorted(selected)
-

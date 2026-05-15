@@ -4,6 +4,7 @@ This project pulls public AEMO NEMWeb forecast datasets, normalizes the latest r
 
 ## What it publishes
 
+- Regional predispatch views from `Predispatch_Reports`
 - Regional forecast prices from `PD7DAY`
 - Regional adequacy and reserve-style metrics from `PDPASA` and `STPASA`
 - Wind and solar region metrics exposed in PASA region solutions
@@ -47,7 +48,10 @@ python3 -m unittest discover -s tests -v
 
 ## Output layout
 
-- `site/index.html` - generated landing page
+- `site/index.html` - predispatch market overview landing page
+- `site/next-day.html` - regional mixed actual dispatch, 5-minute predispatch, and predispatch page
+- `site/seven-day.html` - dedicated 7 day PASA / PD7DAY page
+- `site/demand.html` - next 24 hour demand overview page
 - `site/data/*.csv` - normalized tabular exports
 - `site/data/*.json` - machine-readable exports and summary metadata
 - `site/charts/*.svg` - generated charts per region
@@ -55,6 +59,9 @@ python3 -m unittest discover -s tests -v
 ## Dataset choices
 
 - `PD7DAY` supplies region price forecasts plus the gas fuel forecast total (`GPG_FUEL_FORECAST_TJ`)
+- `DispatchIS_Reports` supplies actual regional dispatch history for the current NEM day
+- `P5_Reports` supplies the 5-minute predispatch window for the next hour
+- `Predispatch_Reports` supplies the remaining live regional predispatch window used on the overview and next-day pages
 - `PDPASA` supplies day-ahead region adequacy fields including demand, capacity, LOR levels, and solar/wind metrics
 - `STPASA` extends those adequacy fields across the longer horizon
 - `Market_Notice` supplies recent notices as plain-text reports

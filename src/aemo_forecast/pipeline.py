@@ -6,12 +6,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 from urllib.error import HTTPError
 
 from .aemo_csv import read_aemo_records
 from .charts import Band, Series, line_chart
 from .market_notice import parse_market_notice
-from .nemweb import fetch_bytes, fetch_text, latest_matching_file, recent_market_notice_files
+from .nemweb import fetch_bytes, fetch_text, latest_matching_file, matching_files, recent_market_notice_files
 
 
 REGIONS = ("NSW1", "QLD1", "SA1", "TAS1", "VIC1")
@@ -21,6 +22,10 @@ GAS_KEY = ("PD7DAY", "MARKET_SUMMARY")
 INTERCONNECTOR_KEY = ("PD7DAY", "INTERCONNECTORSOLUTION")
 PDPASA_KEY = ("PDPASA", "REGIONSOLUTION")
 STPASA_KEY = ("STPASA", "REGIONSOLUTION")
+PREDISPATCH_REGION_KEY = ("PDREGION", "")
+DISPATCH_PRICE_KEY = ("DISPATCH", "PRICE")
+DISPATCH_REGION_KEY = ("DISPATCH", "REGIONSUM")
+P5MIN_REGION_KEY = ("P5MIN", "REGIONSOLUTION")
 INTERCONNECTOR_REGIONS = {
     "N-Q-MNSP1": ("NSW1", "QLD1"),
     "NSW1-QLD1": ("NSW1", "QLD1"),
@@ -180,6 +185,162 @@ def normalize_pasa(rows: list[dict[str, str]], dataset: str, source_url: str) ->
     return normalized
 
 
+def normalize_predispatch_regions(rows: list[dict[str, str]], source_url: str) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        region = row.get("REGIONID")
+        if region not in REGIONS:
+            continue
+        normalized.append(
+            {
+                "dataset": "PREDISPATCH",
+                "source_url": source_url,
+                "run_datetime": isoformat(row["PREDISPATCHSEQNO"]),
+                "interval_datetime": isoformat(row["PERIODID"]),
+                "region_id": region,
+                "rrp": parse_optional_float(row.get("RRP")),
+                "total_demand_mw": parse_optional_float(row.get("TOTALDEMAND")),
+                "dispatchable_generation_mw": parse_optional_float(row.get("DISPATCHABLEGENERATION")),
+                "dispatchable_load_mw": parse_optional_float(row.get("DISPATCHABLELOAD")),
+                "net_interchange_mw": parse_optional_float(row.get("NETINTERCHANGE")),
+                "excess_generation_mw": parse_optional_float(row.get("EXCESSGENERATION")),
+                "available_generation_mw": parse_optional_float(row.get("AVAILABLEGENERATION")),
+                "ss_solar_availability_mw": parse_optional_float(row.get("SS_SOLAR_AVAILABILITY")),
+                "ss_wind_availability_mw": parse_optional_float(row.get("SS_WIND_AVAILABILITY")),
+            }
+        )
+    return normalized
+
+
+def normalize_dispatch_regions(
+    price_rows: list[dict[str, str]],
+    region_rows: list[dict[str, str]],
+    source_url: str,
+) -> list[dict[str, Any]]:
+    price_lookup = {
+        (row["REGIONID"], isoformat(row["SETTLEMENTDATE"])): parse_optional_float(row.get("RRP"))
+        for row in price_rows
+        if row.get("REGIONID") in REGIONS
+    }
+    normalized: list[dict[str, Any]] = []
+    for row in region_rows:
+        region = row.get("REGIONID")
+        if region not in REGIONS:
+            continue
+        interval_datetime = isoformat(row["SETTLEMENTDATE"])
+        normalized.append(
+            {
+                "dataset": "DISPATCH",
+                "source_url": source_url,
+                "run_datetime": interval_datetime,
+                "interval_datetime": interval_datetime,
+                "region_id": region,
+                "rrp": price_lookup.get((region, interval_datetime)),
+                "total_demand_mw": parse_optional_float(row.get("TOTALDEMAND")),
+                "dispatchable_generation_mw": parse_optional_float(row.get("DISPATCHABLEGENERATION")),
+                "dispatchable_load_mw": parse_optional_float(row.get("DISPATCHABLELOAD")),
+                "net_interchange_mw": parse_optional_float(row.get("NETINTERCHANGE")),
+                "excess_generation_mw": parse_optional_float(row.get("EXCESSGENERATION")),
+                "available_generation_mw": parse_optional_float(row.get("AVAILABLEGENERATION")),
+                "total_intermittent_generation_mw": parse_optional_float(row.get("TOTALINTERMITTENTGENERATION")),
+                "demand_and_nonschedgen_mw": parse_optional_float(row.get("DEMAND_AND_NONSCHEDGEN")),
+                "uigf_mw": parse_optional_float(row.get("UIGF")),
+                "ss_solar_uigf_mw": parse_optional_float(row.get("SS_SOLAR_UIGF")),
+                "ss_wind_uigf_mw": parse_optional_float(row.get("SS_WIND_UIGF")),
+                "ss_solar_cleared_mw": parse_optional_float(row.get("SS_SOLAR_CLEAREDMW")),
+                "ss_wind_cleared_mw": parse_optional_float(row.get("SS_WIND_CLEAREDMW")),
+                "ss_solar_availability_mw": parse_optional_float(row.get("SS_SOLAR_AVAILABILITY")),
+                "ss_wind_availability_mw": parse_optional_float(row.get("SS_WIND_AVAILABILITY")),
+            }
+        )
+    return normalized
+
+
+def normalize_p5min_regions(rows: list[dict[str, str]], source_url: str) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        region = row.get("REGIONID")
+        if region not in REGIONS:
+            continue
+        normalized.append(
+            {
+                "dataset": "P5MIN",
+                "source_url": source_url,
+                "run_datetime": isoformat(row["RUN_DATETIME"]),
+                "interval_datetime": isoformat(row["INTERVAL_DATETIME"]),
+                "region_id": region,
+                "rrp": parse_optional_float(row.get("RRP")),
+                "total_demand_mw": parse_optional_float(row.get("TOTALDEMAND")),
+                "dispatchable_generation_mw": parse_optional_float(row.get("DISPATCHABLEGENERATION")),
+                "dispatchable_load_mw": parse_optional_float(row.get("DISPATCHABLELOAD")),
+                "net_interchange_mw": parse_optional_float(row.get("NETINTERCHANGE")),
+                "excess_generation_mw": parse_optional_float(row.get("EXCESSGENERATION")),
+                "available_generation_mw": parse_optional_float(row.get("AVAILABLEGENERATION")),
+                "total_intermittent_generation_mw": parse_optional_float(row.get("TOTALINTERMITTENTGENERATION")),
+                "demand_and_nonschedgen_mw": parse_optional_float(row.get("DEMAND_AND_NONSCHEDGEN")),
+                "uigf_mw": parse_optional_float(row.get("UIGF")),
+                "ss_solar_uigf_mw": parse_optional_float(row.get("SS_SOLAR_UIGF")),
+                "ss_wind_uigf_mw": parse_optional_float(row.get("SS_WIND_UIGF")),
+                "ss_solar_cleared_mw": parse_optional_float(row.get("SS_SOLAR_CLEAREDMW")),
+                "ss_wind_cleared_mw": parse_optional_float(row.get("SS_WIND_CLEAREDMW")),
+                "ss_solar_availability_mw": parse_optional_float(row.get("SS_SOLAR_AVAILABILITY")),
+                "ss_wind_availability_mw": parse_optional_float(row.get("SS_WIND_AVAILABILITY")),
+            }
+        )
+    return normalized
+
+
+def predispatch_window_end(run_datetime: str) -> str:
+    run_at = datetime.fromisoformat(run_datetime)
+    cutoff_date = run_at.date() + timedelta(days=1)
+    if run_at.hour > 12 or (run_at.hour == 12 and run_at.minute >= 30):
+        cutoff_date += timedelta(days=1)
+    return datetime.combine(cutoff_date, datetime.min.time()).replace(hour=4).isoformat()
+
+
+def filter_predispatch_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    latest_run = max(row["run_datetime"] for row in rows)
+    window_end = predispatch_window_end(latest_run)
+    return [
+        row
+        for row in rows
+        if row["run_datetime"] == latest_run and row["interval_datetime"] <= window_end
+    ]
+
+
+def filter_dispatch_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    latest_interval = max(row["interval_datetime"] for row in rows)
+    latest_dt = datetime.fromisoformat(latest_interval).replace(tzinfo=ZoneInfo("Australia/Brisbane"))
+    day_start = latest_dt.replace(hour=0, minute=0, second=0, microsecond=0).replace(tzinfo=None).isoformat()
+    return [row for row in rows if day_start <= row["interval_datetime"] <= latest_interval]
+
+
+def dedupe_rows_by_region_interval(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    latest_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        key = (row["region_id"], row["interval_datetime"])
+        previous = latest_by_key.get(key)
+        if previous is None or row["run_datetime"] >= previous["run_datetime"]:
+            latest_by_key[key] = row
+    return [latest_by_key[key] for key in sorted(latest_by_key)]
+
+
+def filter_p5min_rows(rows: list[dict[str, Any]], actual_end: str | None) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    latest_run = max(row["run_datetime"] for row in rows)
+    latest_run_dt = datetime.fromisoformat(latest_run)
+    p5_end = latest_run_dt + timedelta(hours=1)
+    filtered = [row for row in rows if row["run_datetime"] == latest_run and row["interval_datetime"] <= p5_end.isoformat()]
+    if actual_end is None:
+        return filtered
+    return [row for row in filtered if row["interval_datetime"] > actual_end]
+
+
 def merge_for_charting(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -322,6 +483,9 @@ def build_region_charts(
 @dataclass
 class BuildResult:
     summary: dict[str, Any]
+    dispatch_rows: list[dict[str, Any]]
+    p5min_rows: list[dict[str, Any]]
+    predispatch_rows: list[dict[str, Any]]
     price_rows: list[dict[str, Any]]
     gas_rows: list[dict[str, Any]]
     interconnector_rows: list[dict[str, Any]]
@@ -334,11 +498,38 @@ def build_dataset_bundle() -> BuildResult:
     pd7day_url = latest_matching_file("PD7Day", "PUBLIC_PD7DAY_")
     pdpasa_url = latest_matching_file("PDPASA", "PUBLIC_PDPASA_")
     stpasa_url = latest_matching_file("Short_Term_PASA_Reports", "PUBLIC_STPASA_")
+    predispatch_url = latest_matching_file("Predispatch_Reports", "PUBLIC_PREDISPATCH_")
+    dispatch_files = matching_files("DispatchIS_Reports", "PUBLIC_DISPATCHIS_")
+    dispatch_url = dispatch_files[-1]
+    p5min_url = latest_matching_file("P5_Reports", "PUBLIC_P5MIN_")
 
     pd7day_records = read_aemo_records(fetch_bytes(pd7day_url), [PRICE_KEY, GAS_KEY, INTERCONNECTOR_KEY])
     pdpasa_records = read_aemo_records(fetch_bytes(pdpasa_url), [PDPASA_KEY])
     stpasa_records = read_aemo_records(fetch_bytes(stpasa_url), [STPASA_KEY])
+    predispatch_records = read_aemo_records(fetch_bytes(predispatch_url), [PREDISPATCH_REGION_KEY])
+    current_dispatch_date = dispatch_url.split("PUBLIC_DISPATCHIS_")[1][:8]
+    dispatch_urls = [url for url in dispatch_files if f"PUBLIC_DISPATCHIS_{current_dispatch_date}" in url]
+    p5min_records = read_aemo_records(fetch_bytes(p5min_url), [P5MIN_REGION_KEY])
 
+    predispatch_rows = filter_predispatch_rows(
+        normalize_predispatch_regions(predispatch_records.get(PREDISPATCH_REGION_KEY, []), predispatch_url)
+    )
+    all_dispatch_rows: list[dict[str, Any]] = []
+    for source_url in dispatch_urls:
+        dispatch_records = read_aemo_records(fetch_bytes(source_url), [DISPATCH_PRICE_KEY, DISPATCH_REGION_KEY])
+        all_dispatch_rows.extend(
+            normalize_dispatch_regions(
+                dispatch_records.get(DISPATCH_PRICE_KEY, []),
+                dispatch_records.get(DISPATCH_REGION_KEY, []),
+                source_url,
+            )
+        )
+    dispatch_rows = filter_dispatch_rows(dedupe_rows_by_region_interval(all_dispatch_rows))
+    latest_dispatch_interval = max((row["interval_datetime"] for row in dispatch_rows), default=None)
+    p5min_rows = filter_p5min_rows(
+        normalize_p5min_regions(p5min_records.get(P5MIN_REGION_KEY, []), p5min_url),
+        latest_dispatch_interval,
+    )
     price_rows = normalize_prices(pd7day_records.get(PRICE_KEY, []), pd7day_url)
     gas_rows = normalize_gas(pd7day_records.get(GAS_KEY, []), pd7day_url)
     interconnector_rows = normalize_interconnector_imports(pd7day_records.get(INTERCONNECTOR_KEY, []), pd7day_url)
@@ -359,12 +550,18 @@ def build_dataset_bundle() -> BuildResult:
     summary = {
         "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "sources": {
+            "predispatch": predispatch_url,
+            "dispatch": dispatch_url,
+            "p5min": p5min_url,
             "pd7day": pd7day_url,
             "pdpasa": pdpasa_url,
             "stpasa": stpasa_url,
             "market_notice_count": len(notices),
         },
         "counts": {
+            "predispatch_rows": len(predispatch_rows),
+            "dispatch_rows": len(dispatch_rows),
+            "p5min_rows": len(p5min_rows),
             "price_rows": len(price_rows),
             "gas_rows": len(gas_rows),
             "interconnector_rows": len(interconnector_rows),
@@ -378,6 +575,9 @@ def build_dataset_bundle() -> BuildResult:
 
     return BuildResult(
         summary=summary,
+        dispatch_rows=dispatch_rows,
+        p5min_rows=p5min_rows,
+        predispatch_rows=predispatch_rows,
         price_rows=price_rows,
         gas_rows=gas_rows,
         interconnector_rows=interconnector_rows,

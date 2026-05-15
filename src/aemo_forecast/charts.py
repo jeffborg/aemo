@@ -140,7 +140,7 @@ def line_chart(
     actual_minimum = min(all_values)
     actual_maximum = max(all_values)
     minimum = actual_minimum if y_min is None else y_min
-    maximum = actual_maximum if y_max is None else y_max
+    maximum = actual_maximum if y_max is None else min(actual_maximum, y_max)
     minimum, maximum, y_ticks = _y_axis_ticks(minimum, maximum)
 
     title_y = 24
@@ -169,9 +169,13 @@ def line_chart(
     bottom = 72
     plot_width = width - left - right
     plot_height = height - top - bottom
+    start_time = x_values[0]
+    end_time = x_values[-1]
+    total_seconds = max((end_time - start_time).total_seconds(), 1.0)
 
     def x_pos(index: int) -> float:
-        return left + (plot_width * index / max(1, len(x_values) - 1))
+        elapsed = (x_values[index] - start_time).total_seconds()
+        return left + (plot_width * elapsed / total_seconds)
 
     def y_pos(value: float) -> float:
         return top + plot_height - ((value - minimum) / (maximum - minimum) * plot_height)
@@ -265,11 +269,13 @@ def line_chart(
             left_edge = left
             right_edge = width - right
         else:
-            previous_x = x_pos(max(0, idx - 1))
-            current_x = x_pos(idx)
-            next_x = x_pos(min(len(x_values) - 1, idx + 1))
-            left_edge = left if idx == 0 else (previous_x + current_x) / 2
-            right_edge = (width - right) if idx == len(x_values) - 1 else (current_x + next_x) / 2
+            current_time = x_values[idx]
+            previous_time = x_values[max(0, idx - 1)]
+            next_time = x_values[min(len(x_values) - 1, idx + 1)]
+            left_mid = current_time if idx == 0 else previous_time + ((current_time - previous_time) / 2)
+            right_mid = current_time if idx == len(x_values) - 1 else current_time + ((next_time - current_time) / 2)
+            left_edge = left if idx == 0 else left + (plot_width * (left_mid - start_time).total_seconds() / total_seconds)
+            right_edge = (width - right) if idx == len(x_values) - 1 else left + (plot_width * (right_mid - start_time).total_seconds() / total_seconds)
 
         tooltip_lines = [_tooltip_timestamp(timestamp)]
         for item in area_bands:

@@ -57,6 +57,24 @@ class ChartTests(unittest.TestCase):
         self.assertIn(">4200</text>", svg)
         self.assertIn('transform="rotate(-45', svg)
 
+    def test_line_chart_uses_y_max_as_cap_not_forced_ceiling(self) -> None:
+        start = datetime(2026, 5, 15, 0, 0)
+        x_values = [start + timedelta(hours=6 * idx) for idx in range(4)]
+
+        svg = line_chart(
+            title="NSW1 forecast price",
+            x_values=x_values,
+            series_list=[Series("RRP", "#2563eb", [100.0, 250.0, 420.0, 600.0])],
+            y_max=3000.0,
+            annotate_clipped_max=True,
+        )
+
+        self.assertIn(">0</text>", svg)
+        self.assertIn(">200</text>", svg)
+        self.assertIn(">400</text>", svg)
+        self.assertIn(">600</text>", svg)
+        self.assertNotIn(">3000</text>", svg)
+
     def test_line_chart_allows_smaller_negative_ticks(self) -> None:
         start = datetime(2026, 5, 15, 0, 0)
         x_values = [start + timedelta(hours=6 * idx) for idx in range(3)]

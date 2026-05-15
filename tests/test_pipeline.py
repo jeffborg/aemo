@@ -5,9 +5,12 @@ import unittest
 from aemo_forecast.pipeline import (
     REGIONS,
     build_region_charts,
+    filter_predispatch_rows,
     horizon_for_interval,
     merge_for_charting,
     normalize_interconnector_imports,
+    normalize_predispatch_regions,
+    predispatch_window_end,
 )
 
 
@@ -115,6 +118,58 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(100.0, by_region["QLD1"])
         self.assertEqual(50.0, by_region["VIC1"])
         self.assertEqual(-50.0, by_region["SA1"])
+
+    def test_normalize_predispatch_regions_reads_pdregion_rows(self) -> None:
+        normalized = normalize_predispatch_regions(
+            [
+                {
+                    "PREDISPATCHSEQNO": "2026/05/15 11:30:00",
+                    "REGIONID": "NSW1",
+                    "PERIODID": "2026/05/15 12:00:00",
+                    "RRP": "85.2",
+                    "TOTALDEMAND": "7000",
+                    "DISPATCHABLEGENERATION": "7600",
+                    "DISPATCHABLELOAD": "300",
+                    "NETINTERCHANGE": "150",
+                    "EXCESSGENERATION": "0",
+                }
+            ],
+            "https://example.com/predispatch.zip",
+        )
+
+        self.assertEqual("PREDISPATCH", normalized[0]["dataset"])
+        self.assertEqual("2026-05-15T11:30:00", normalized[0]["run_datetime"])
+        self.assertEqual("2026-05-15T12:00:00", normalized[0]["interval_datetime"])
+        self.assertEqual(7000.0, normalized[0]["total_demand_mw"])
+        self.assertEqual(150.0, normalized[0]["net_interchange_mw"])
+
+    def test_predispatch_window_end_flips_after_1230(self) -> None:
+        self.assertEqual("2026-05-16T04:00:00", predispatch_window_end("2026-05-15T12:00:00"))
+        self.assertEqual("2026-05-17T04:00:00", predispatch_window_end("2026-05-15T12:30:00"))
+
+    def test_filter_predispatch_rows_keeps_latest_run_window(self) -> None:
+        filtered = filter_predispatch_rows(
+            [
+                {
+                    "run_datetime": "2026-05-15T12:30:00",
+                    "interval_datetime": "2026-05-16T04:00:00",
+                    "region_id": "NSW1",
+                },
+                {
+                    "run_datetime": "2026-05-15T12:30:00",
+                    "interval_datetime": "2026-05-17T04:00:00",
+                    "region_id": "NSW1",
+                },
+                {
+                    "run_datetime": "2026-05-15T12:00:00",
+                    "interval_datetime": "2026-05-16T04:00:00",
+                    "region_id": "NSW1",
+                },
+            ]
+        )
+
+        self.assertEqual(2, len(filtered))
+        self.assertTrue(all(row["run_datetime"] == "2026-05-15T12:30:00" for row in filtered))
 
 
 if __name__ == "__main__":
