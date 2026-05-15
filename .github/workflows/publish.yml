@@ -6,7 +6,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: "15 * * * *"
+    - cron: "*/15 * * * *"
 
 permissions:
   contents: read
@@ -45,4 +45,3 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
-
