@@ -9,7 +9,7 @@ from typing import Any
 from urllib.error import HTTPError
 
 from .aemo_csv import read_aemo_records
-from .charts import Series, line_chart
+from .charts import Band, Series, line_chart
 from .market_notice import parse_market_notice
 from .nemweb import fetch_bytes, fetch_text, latest_matching_file, recent_market_notice_files
 
@@ -232,27 +232,52 @@ def build_region_charts(
             key=lambda row: row["interval_datetime"],
         )
         region_imports = imports_by_region[region]
+        available_capacity = [row["aggregate_capacity_available_mw"] for row in region_adequacy]
+        import_support = []
+        import_support_top = []
+        for row, available in zip(region_adequacy, available_capacity):
+            net_import = region_imports.get(row["interval_datetime"])
+            positive_import = max(net_import, 0.0) if net_import is not None else 0.0
+            lower = available if available is not None else None
+            import_support.append(lower)
+            import_support_top.append(
+                None if lower is None else lower + positive_import
+            )
 
         charts[f"{region.lower()}_price.svg"] = line_chart(
             title=f"{region} forecast price",
             x_values=_chart_datetimes(region_prices),
             series_list=[Series("RRP", "#2563eb", [row["rrp"] for row in region_prices])],
+            y_max=3000.0,
+            annotate_clipped_max=True,
         )
         charts[f"{region.lower()}_adequacy.svg"] = line_chart(
             title=f"{region} demand and capacity",
             x_values=_chart_datetimes(region_adequacy),
+            bands=[
+                Band(
+                    "Available capacity",
+                    "#a855f7",
+                    [0.0 if value is not None else None for value in available_capacity],
+                    available_capacity,
+                    opacity=0.24,
+                ),
+                Band(
+                    "Import support",
+                    "#06b6d4",
+                    import_support,
+                    import_support_top,
+                    opacity=0.30,
+                ),
+                Band(
+                    "Demand P10-P90",
+                    "#dc2626",
+                    [row["demand10_mw"] for row in region_adequacy],
+                    [row["demand90_mw"] for row in region_adequacy],
+                )
+            ],
             series_list=[
                 Series("Demand P50", "#dc2626", [row["demand50_mw"] for row in region_adequacy]),
-                Series(
-                    "Available capacity",
-                    "#059669",
-                    [row["aggregate_capacity_available_mw"] for row in region_adequacy],
-                ),
-                Series(
-                    "Net imports",
-                    "#0f766e",
-                    [region_imports.get(row["interval_datetime"]) for row in region_adequacy],
-                ),
                 Series("LOR1 level", "#d97706", [row["calculated_lor1_level_mw"] for row in region_adequacy]),
                 Series("LOR2 level", "#7c3aed", [row["calculated_lor2_level_mw"] for row in region_adequacy]),
             ],
@@ -260,9 +285,29 @@ def build_region_charts(
         charts[f"{region.lower()}_renewables.svg"] = line_chart(
             title=f"{region} solar and wind forecast",
             x_values=_chart_datetimes(region_adequacy),
+            bands=[
+                Band(
+                    "Solar UIGF",
+                    "#f59e0b",
+                    [0.0 if row["ss_solar_uigf_mw"] is not None else None for row in region_adequacy],
+                    [row["ss_solar_uigf_mw"] for row in region_adequacy],
+                    opacity=0.32,
+                ),
+                Band(
+                    "Wind UIGF",
+                    "#0ea5e9",
+                    [row["ss_solar_uigf_mw"] for row in region_adequacy],
+                    [
+                        None
+                        if row["ss_solar_uigf_mw"] is None or row["ss_wind_uigf_mw"] is None
+                        else row["ss_solar_uigf_mw"] + row["ss_wind_uigf_mw"]
+                        for row in region_adequacy
+                    ],
+                    opacity=0.32,
+                ),
+            ],
             series_list=[
-                Series("Solar UIGF", "#f59e0b", [row["ss_solar_uigf_mw"] for row in region_adequacy]),
-                Series("Wind UIGF", "#0ea5e9", [row["ss_wind_uigf_mw"] for row in region_adequacy]),
+                Series("Demand P50", "#dc2626", [row["demand50_mw"] for row in region_adequacy]),
                 Series(
                     "Intermittent generation",
                     "#10b981",

@@ -2,19 +2,81 @@ from __future__ import annotations
 
 from html import escape
 from pathlib import Path
+import re
 
 from .pipeline import BuildResult, REGIONS, write_csv, write_json
 
 
+NOTICE_REFERENCE_PATTERN = re.compile(r"\bMarket Notice\s+(\d{5,})\b", re.IGNORECASE)
+
+
+def _notice_anchor(notice_id: str) -> str:
+    return f"notice-{notice_id}"
+
+
+def _notice_references(text: str) -> list[str]:
+    seen: set[str] = set()
+    references: list[str] = []
+    for match in NOTICE_REFERENCE_PATTERN.finditer(text):
+        notice_id = match.group(1)
+        if notice_id not in seen:
+            seen.add(notice_id)
+            references.append(notice_id)
+    return references
+
+
+def _render_notice_body(text: str, known_notice_ids: set[str]) -> str:
+    lines: list[str] = []
+    for raw_line in text[:800].splitlines():
+        parts: list[str] = []
+        cursor = 0
+        for match in NOTICE_REFERENCE_PATTERN.finditer(raw_line):
+            parts.append(escape(raw_line[cursor : match.start()]))
+            notice_id = match.group(1)
+            label = escape(match.group(0))
+            if notice_id in known_notice_ids:
+                parts.append(f'<a href="#{_notice_anchor(notice_id)}">{label}</a>')
+            else:
+                parts.append(label)
+            cursor = match.end()
+        parts.append(escape(raw_line[cursor:]))
+        lines.append("".join(parts))
+    return "<br />".join(lines)
+
+
 def _notices_html(build: BuildResult) -> str:
+    selected_notices = build.notices[:50]
+    selected_ids = {
+        notice_id
+        for notice in selected_notices
+        if (notice_id := notice.get("notice_id"))
+    }
+    referenced_ids = {
+        reference
+        for notice in selected_notices
+        for reference in _notice_references(notice.get("reason_text", ""))
+    }
+    rendered_ids = selected_ids | referenced_ids
+    rendered_notices = [
+        notice
+        for notice in build.notices
+        if notice.get("notice_id") in rendered_ids
+    ]
+    known_notice_ids = {
+        notice_id
+        for notice in rendered_notices
+        if (notice_id := notice.get("notice_id"))
+    }
     items = []
-    for notice in build.notices[:50]:
+    for notice in rendered_notices:
         title = notice.get("external_reference") or notice.get("notice_type_description") or "Market notice"
         created = notice.get("creation_datetime", "")
-        body = escape(notice.get("reason_text", "")[:800]).replace("\n", "<br />")
+        notice_id = notice.get("notice_id", "")
+        body = _render_notice_body(notice.get("reason_text", ""), known_notice_ids)
         items.append(
-            "<article class='notice'>"
+            f"<article class='notice' id='{escape(_notice_anchor(notice_id))}'>"
             f"<h4>{escape(title)}</h4>"
+            f"<p><strong>Notice ID:</strong> {escape(notice_id)}</p>"
             f"<p><strong>Created:</strong> {escape(created)}</p>"
             f"<p><strong>Type:</strong> {escape(notice.get('notice_type_description', ''))}</p>"
             f"<p>{body}</p>"
@@ -23,24 +85,25 @@ def _notices_html(build: BuildResult) -> str:
     return "\n".join(items)
 
 
-def _region_section(region: str) -> str:
+def _chart_figure(svg_markup: str | None, caption: str) -> str:
+    chart = svg_markup if svg_markup is not None else '<div class="chart-missing">Chart unavailable</div>'
+    return (
+        "<figure>"
+        f"{chart}"
+        f"<figcaption>{escape(caption)}</figcaption>"
+        "</figure>"
+    )
+
+
+def _region_section(build: BuildResult, region: str) -> str:
     slug = region.lower()
     return f"""
     <section class="region-card">
       <h3>{region}</h3>
       <div class="chart-grid">
-        <figure>
-          <img src="charts/{slug}_price.svg" alt="{region} forecast price chart" />
-          <figcaption>Forecast price</figcaption>
-        </figure>
-        <figure>
-          <img src="charts/{slug}_adequacy.svg" alt="{region} demand and capacity chart" />
-          <figcaption>Demand, available capacity, net imports, LOR1, and LOR2</figcaption>
-        </figure>
-        <figure>
-          <img src="charts/{slug}_renewables.svg" alt="{region} solar and wind chart" />
-          <figcaption>Solar, wind, and intermittent generation</figcaption>
-        </figure>
+        {_chart_figure(build.charts.get(f"{slug}_price.svg"), "Forecast price")}
+        {_chart_figure(build.charts.get(f"{slug}_adequacy.svg"), "Balance view with capacity, import support, demand band, LOR1, and LOR2")}
+        {_chart_figure(build.charts.get(f"{slug}_renewables.svg"), "Stacked solar and wind with intermittent generation and demand")}
       </div>
     </section>
     """
@@ -55,15 +118,16 @@ def render_index(build: BuildResult) -> str:
   <title>AEMO forecast publisher</title>
   <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f8fafc; color: #111827; }}
-    main {{ max-width: 1200px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }}
+    main {{ max-width: 1360px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }}
     h1, h2, h3 {{ margin-bottom: 0.5rem; }}
     .summary {{ background: white; border-radius: 12px; padding: 1rem 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }}
     .links a {{ margin-right: 1rem; }}
     .region-card, .notice-panel {{ background: white; border-radius: 12px; padding: 1rem 1.25rem; margin-top: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }}
-    .chart-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }}
-    figure {{ margin: 0; }}
-    img {{ width: 100%; height: auto; border: 1px solid #e5e7eb; border-radius: 8px; background: white; }}
+    .chart-grid {{ display: flex; flex-direction: column; gap: 1rem; }}
+    figure {{ margin: 0; max-width: 1120px; }}
+    figure svg {{ display: block; width: 100%; height: auto; border: 1px solid #e5e7eb; border-radius: 8px; background: white; }}
     figcaption {{ margin-top: 0.5rem; color: #4b5563; font-size: 0.95rem; }}
+    .chart-missing {{ padding: 2rem; border: 1px dashed #cbd5e1; border-radius: 8px; color: #64748b; background: #fff; }}
     .notice {{ border-top: 1px solid #e5e7eb; padding-top: 1rem; margin-top: 1rem; }}
   </style>
 </head>
@@ -89,7 +153,7 @@ def render_index(build: BuildResult) -> str:
       </p>
     </section>
     <h2>Regional charts</h2>
-    {''.join(_region_section(region) for region in REGIONS)}
+    {''.join(_region_section(build, region) for region in REGIONS)}
     <section class="notice-panel">
       <h2>Recent market notices</h2>
       {_notices_html(build)}

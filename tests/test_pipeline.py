@@ -54,7 +54,9 @@ class PipelineTests(unittest.TestCase):
                         "region_id": region,
                         "interval_datetime": hour,
                         "run_datetime": "2026-05-15T08:00:00",
+                        "demand10_mw": demand - 300.0,
                         "demand50_mw": demand,
+                        "demand90_mw": demand + 300.0,
                         "aggregate_capacity_available_mw": available,
                         "calculated_lor1_level_mw": 9500.0,
                         "calculated_lor2_level_mw": 9800.0,
@@ -80,8 +82,14 @@ class PipelineTests(unittest.TestCase):
 
         charts = build_region_charts(price_rows, adequacy_rows, import_rows)
 
+        self.assertIn("Demand P10-P90", charts["nsw1_adequacy.svg"])
         self.assertIn("Available capacity", charts["nsw1_adequacy.svg"])
-        self.assertIn("Net imports", charts["nsw1_adequacy.svg"])
+        self.assertIn("Import support", charts["nsw1_adequacy.svg"])
+        self.assertIn('fill="#a855f7"', charts["nsw1_adequacy.svg"])
+        self.assertIn("Solar UIGF", charts["nsw1_renewables.svg"])
+        self.assertIn("Wind UIGF", charts["nsw1_renewables.svg"])
+        self.assertIn("Demand P50", charts["nsw1_renewables.svg"])
+        self.assertIn('fill="#f59e0b"', charts["nsw1_renewables.svg"])
 
     def test_normalize_interconnector_imports_rolls_up_to_regions(self) -> None:
         normalized = normalize_interconnector_imports(
