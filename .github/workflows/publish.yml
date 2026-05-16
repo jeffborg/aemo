@@ -67,7 +67,7 @@ jobs:
       - name: Restore AEMO HTTP cache
         uses: actions/cache@v4
         with:
-          path: .cache/aemo-http
+          path: ${{ env.AEMO_HTTP_CACHE_DIR }}
           key: aemo-http-${{ runner.os }}-${{ steps.source_fingerprint.outputs.value }}
           restore-keys: |
             aemo-http-${{ runner.os }}-
