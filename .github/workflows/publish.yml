@@ -39,12 +39,12 @@ jobs:
           predispatch_url = latest_matching_file('Predispatch_Reports', 'PUBLIC_PREDISPATCH_')
           dispatch_files = matching_files('DispatchIS_Reports', 'PUBLIC_DISPATCHIS_')
           if not dispatch_files:
-              raise RuntimeError('No files found in DispatchIS_Reports directory matching pattern PUBLIC_DISPATCHIS_*')
+              raise RuntimeError('No files found in DispatchIS_Reports directory matching prefix PUBLIC_DISPATCHIS_')
           dispatch_url = dispatch_files[-1]
           dispatch_date_match = re.search(r'PUBLIC_DISPATCHIS_(\d{8})', dispatch_url)
           if dispatch_date_match is None:
               raise RuntimeError(
-                  f'Unable to parse dispatch date from URL using pattern PUBLIC_DISPATCHIS_(\\d{{8}}): {dispatch_url}'
+                  f'Unable to parse dispatch date from URL with expected prefix PUBLIC_DISPATCHIS_YYYYMMDD: {dispatch_url}'
               )
           current_dispatch_date = dispatch_date_match.group(1)
           dispatch_urls = [url for url in dispatch_files if f'PUBLIC_DISPATCHIS_{current_dispatch_date}' in url]
