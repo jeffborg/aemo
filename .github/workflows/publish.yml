@@ -39,7 +39,7 @@ jobs:
           predispatch_url = latest_matching_file('Predispatch_Reports', 'PUBLIC_PREDISPATCH_')
           dispatch_files = matching_files('DispatchIS_Reports', 'PUBLIC_DISPATCHIS_')
           if not dispatch_files:
-              raise RuntimeError('No files found in DispatchIS_Reports directory matching pattern PUBLIC_DISPATCHIS_')
+              raise RuntimeError('No files found in DispatchIS_Reports directory matching pattern PUBLIC_DISPATCHIS_*')
           dispatch_url = dispatch_files[-1]
           dispatch_date_match = re.search(r'PUBLIC_DISPATCHIS_(\d{8})', dispatch_url)
           if dispatch_date_match is None:
