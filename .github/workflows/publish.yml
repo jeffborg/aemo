@@ -16,12 +16,63 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      AEMO_HTTP_CACHE_DIR: .cache/aemo-http
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Compute data source fingerprint
+        id: source_fingerprint
+        run: |
+          echo "value=$(PYTHONPATH=src python3 - <<'PY'
+          import hashlib
+          import re
+          from aemo_forecast.nemweb import latest_matching_file, matching_files, recent_market_notice_files
+
+          pd7day_url = latest_matching_file('PD7Day', 'PUBLIC_PD7DAY_')
+          pdpasa_url = latest_matching_file('PDPASA', 'PUBLIC_PDPASA_')
+          stpasa_url = latest_matching_file('Short_Term_PASA_Reports', 'PUBLIC_STPASA_')
+          predispatch_url = latest_matching_file('Predispatch_Reports', 'PUBLIC_PREDISPATCH_')
+          dispatch_files = matching_files('DispatchIS_Reports', 'PUBLIC_DISPATCHIS_')
+          if not dispatch_files:
+              raise RuntimeError('No files found in DispatchIS_Reports directory matching prefix PUBLIC_DISPATCHIS_')
+          dispatch_url = dispatch_files[-1]
+          dispatch_date_match = re.search(r'PUBLIC_DISPATCHIS_(\d{8})', dispatch_url)
+          if dispatch_date_match is None:
+              raise RuntimeError(
+                  f'Unable to parse dispatch date from URL with expected prefix PUBLIC_DISPATCHIS_YYYYMMDD: {dispatch_url}'
+              )
+          current_dispatch_date = dispatch_date_match.group(1)
+          dispatch_urls = [url for url in dispatch_files if f'PUBLIC_DISPATCHIS_{current_dispatch_date}' in url]
+          p5min_url = latest_matching_file('P5_Reports', 'PUBLIC_P5MIN_')
+          notice_urls = recent_market_notice_files()
+
+          urls = sorted(
+              [
+                  pd7day_url,
+                  pdpasa_url,
+                  stpasa_url,
+                  predispatch_url,
+                  p5min_url,
+                  *dispatch_urls,
+                  *notice_urls,
+              ]
+          )
+          print(hashlib.sha256('\n'.join(urls).encode('utf-8')).hexdigest())
+          PY
+          )" >> "$GITHUB_OUTPUT"
+
+      - name: Restore AEMO HTTP cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.AEMO_HTTP_CACHE_DIR }}
+          key: aemo-http-${{ runner.os }}-${{ steps.source_fingerprint.outputs.value }}
+          restore-keys: |
+            aemo-http-${{ runner.os }}-
 
       - name: Run tests
         run: PYTHONPATH=src python3 -m unittest discover -s tests -v
