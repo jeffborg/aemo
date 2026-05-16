@@ -30,6 +30,7 @@ jobs:
         run: |
           echo "value=$(PYTHONPATH=src python3 - <<'PY'
           import hashlib
+          import re
           from aemo_forecast.nemweb import latest_matching_file, matching_files, recent_market_notice_files
 
           pd7day_url = latest_matching_file('PD7Day', 'PUBLIC_PD7DAY_')
@@ -37,8 +38,13 @@ jobs:
           stpasa_url = latest_matching_file('Short_Term_PASA_Reports', 'PUBLIC_STPASA_')
           predispatch_url = latest_matching_file('Predispatch_Reports', 'PUBLIC_PREDISPATCH_')
           dispatch_files = matching_files('DispatchIS_Reports', 'PUBLIC_DISPATCHIS_')
+          if not dispatch_files:
+              raise RuntimeError('No files found for DispatchIS_Reports matching PUBLIC_DISPATCHIS_')
           dispatch_url = dispatch_files[-1]
-          current_dispatch_date = dispatch_url.split('PUBLIC_DISPATCHIS_')[1][:8]
+          dispatch_date_match = re.search(r'PUBLIC_DISPATCHIS_(\d{8})', dispatch_url)
+          if dispatch_date_match is None:
+              raise RuntimeError(f'Unable to parse dispatch date from URL: {dispatch_url}')
+          current_dispatch_date = dispatch_date_match.group(1)
           dispatch_urls = [url for url in dispatch_files if f'PUBLIC_DISPATCHIS_{current_dispatch_date}' in url]
           p5min_url = latest_matching_file('P5_Reports', 'PUBLIC_P5MIN_')
           notice_urls = recent_market_notice_files()
