@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import hashlib
+import os
 import re
 import subprocess
 import urllib.parse
 import urllib.request
 from datetime import date, timedelta
 from html.parser import HTMLParser
+from pathlib import Path
 from urllib.error import HTTPError
 
 
 BASE_URL = "https://nemweb.com.au/Reports/Current"
 DEFAULT_HEADERS = {"User-Agent": "aemo-forecast-publisher/0.1"}
 FILENAME_DATE_PATTERN = re.compile(r"_(\d{8})(?:_|\.|$)")
+HTTP_CACHE_DIR_ENV = "AEMO_HTTP_CACHE_DIR"
 
 
 class DirectoryParser(HTMLParser):
@@ -31,15 +35,27 @@ def _request(url: str) -> urllib.request.Request:
     return urllib.request.Request(url, headers=DEFAULT_HEADERS)
 
 
+def _cached_bytes_path(url: str) -> Path | None:
+    cache_dir = os.environ.get(HTTP_CACHE_DIR_ENV)
+    if not cache_dir:
+        return None
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
+    return Path(cache_dir) / f"{digest}.bin"
+
+
 def fetch_text(url: str) -> str:
     with urllib.request.urlopen(_request(url)) as response:
         return response.read().decode("utf-8", "ignore")
 
 
 def fetch_bytes(url: str) -> bytes:
+    cached_path = _cached_bytes_path(url)
+    if cached_path is not None and cached_path.exists():
+        return cached_path.read_bytes()
+
     try:
         with urllib.request.urlopen(_request(url)) as response:
-            return response.read()
+            payload = response.read()
     except HTTPError as exc:
         if exc.code != 403:
             raise
@@ -48,7 +64,12 @@ def fetch_bytes(url: str) -> bytes:
             check=True,
             capture_output=True,
         )
-        return result.stdout
+        payload = result.stdout
+
+    if cached_path is not None:
+        cached_path.parent.mkdir(parents=True, exist_ok=True)
+        cached_path.write_bytes(payload)
+    return payload
 
 
 def list_links(directory_url: str) -> list[str]:
