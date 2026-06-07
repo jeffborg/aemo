@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import time
 import urllib.parse
 import urllib.request
 from datetime import date, timedelta
 from html.parser import HTMLParser
-from subprocess import CalledProcessError
 from urllib.error import HTTPError
 
 
 BASE_URL = "https://nemweb.com.au/Reports/Current"
 DEFAULT_HEADERS = {"User-Agent": "aemo-forecast-publisher/0.1"}
 FILENAME_DATE_PATTERN = re.compile(r"_(\d{8})(?:_|\.|$)")
-FETCH_RETRY_ATTEMPTS = 4
+FETCH_403_RETRY_DELAY = 5
+NOTICE_INTER_REQUEST_DELAY = 0.3
 
 
 class DirectoryParser(HTMLParser):
@@ -40,30 +39,15 @@ def fetch_text(url: str) -> str:
 
 
 def fetch_bytes(url: str) -> bytes:
-    last_error: Exception | None = None
-    for attempt in range(1, FETCH_RETRY_ATTEMPTS + 1):
-        try:
-            with urllib.request.urlopen(_request(url)) as response:
-                return response.read()
-        except HTTPError as exc:
-            if exc.code != 403:
-                raise
-            last_error = exc
-
-        try:
-            result = subprocess.run(
-                ["curl", "-A", DEFAULT_HEADERS["User-Agent"], "-L", "--fail", url],
-                check=True,
-                capture_output=True,
-            )
-            return result.stdout
-        except CalledProcessError as exc:
-            last_error = exc
-
-        if attempt < FETCH_RETRY_ATTEMPTS:
-            time.sleep(attempt)
-
-    raise RuntimeError(f"Failed to fetch bytes after {FETCH_RETRY_ATTEMPTS} attempts: {url}") from last_error
+    try:
+        with urllib.request.urlopen(_request(url)) as response:
+            return response.read()
+    except HTTPError as exc:
+        if exc.code != 403:
+            raise
+    time.sleep(FETCH_403_RETRY_DELAY)
+    with urllib.request.urlopen(_request(url)) as response:
+        return response.read()
 
 
 def list_links(directory_url: str) -> list[str]:
@@ -90,9 +74,15 @@ def latest_matching_file(directory_name: str, prefix: str) -> str:
 
 def recent_market_notice_files() -> list[str]:
     directory_url = f"{BASE_URL}/Market_Notice/"
+    try:
+        raw_links = list_links(directory_url)
+    except HTTPError as exc:
+        if exc.code == 403:
+            return []
+        raise
     links = [
         urllib.parse.urljoin(directory_url, link)
-        for link in list_links(directory_url)
+        for link in raw_links
         if "MKTNOTICE" in link and ".R" in link
     ]
     if not links:

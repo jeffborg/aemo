@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -12,7 +13,7 @@ from urllib.error import HTTPError
 from .aemo_csv import read_aemo_records
 from .charts import Band, Series, line_chart
 from .market_notice import parse_market_notice
-from .nemweb import fetch_bytes, fetch_text, latest_matching_file, matching_files, recent_market_notice_files
+from .nemweb import NOTICE_INTER_REQUEST_DELAY, fetch_bytes, fetch_text, latest_matching_file, matching_files, recent_market_notice_files
 
 
 REGIONS = ("NSW1", "QLD1", "SA1", "TAS1", "VIC1")
@@ -538,7 +539,9 @@ def build_dataset_bundle() -> BuildResult:
 
     notice_errors: list[dict[str, str]] = []
     notices: list[dict[str, Any]] = []
-    for url in recent_market_notice_files():
+    for i, url in enumerate(recent_market_notice_files()):
+        if i > 0:
+            time.sleep(NOTICE_INTER_REQUEST_DELAY)
         try:
             notices.append(parse_market_notice(fetch_text(url), url))
         except HTTPError as exc:
