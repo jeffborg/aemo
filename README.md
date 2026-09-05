@@ -67,3 +67,4 @@ python3 -m unittest discover -s tests -v
 - `Market_Notice` supplies recent notices as plain-text reports
 
 Coal, hydro, and gas generation mix splits are not published unless AEMO exposes them directly in these forecast datasets. Right now the only fuel-style forecast field wired in is the gas fuel total from `PD7DAY`.
+
